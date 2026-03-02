@@ -40,7 +40,10 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error("News fetch error:", err);
     return NextResponse.json(
-      { error: "Internal server error", details: (err as Error).message },
+      {
+        error: "Internal server error",
+        ...(process.env.NODE_ENV !== "production" && { details: (err as Error).message }),
+      },
       { status: 500 }
     );
   }

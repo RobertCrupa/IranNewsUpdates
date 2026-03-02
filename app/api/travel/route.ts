@@ -39,7 +39,10 @@ export async function GET() {
   } catch (err) {
     console.error("Travel alerts fetch error:", err);
     return NextResponse.json(
-      { error: "Internal server error", details: (err as Error).message },
+      {
+        error: "Internal server error",
+        ...(process.env.NODE_ENV !== "production" && { details: (err as Error).message }),
+      },
       { status: 500 }
     );
   }

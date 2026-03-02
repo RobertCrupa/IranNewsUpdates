@@ -43,7 +43,11 @@ export async function POST(request: NextRequest) {
           results.newsCount++;
         }
       } catch (err) {
-        results.errors.push(`News scraping failed: ${(err as Error).message}`);
+        results.errors.push(
+          process.env.NODE_ENV !== "production"
+            ? `News scraping failed: ${(err as Error).message}`
+            : "News scraping failed"
+        );
       }
     }
 
@@ -67,7 +71,11 @@ export async function POST(request: NextRequest) {
           results.socialCount++;
         }
       } catch (err) {
-        results.errors.push(`Social scraping failed: ${(err as Error).message}`);
+        results.errors.push(
+          process.env.NODE_ENV !== "production"
+            ? `Social scraping failed: ${(err as Error).message}`
+            : "Social scraping failed"
+        );
       }
     }
 
@@ -79,7 +87,10 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error("Scrape error:", err);
     return NextResponse.json(
-      { error: "Internal server error", details: (err as Error).message },
+      {
+        error: "Internal server error",
+        ...(process.env.NODE_ENV !== "production" && { details: (err as Error).message }),
+      },
       { status: 500 }
     );
   }

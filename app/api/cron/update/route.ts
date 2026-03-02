@@ -56,7 +56,11 @@ export async function GET(request: NextRequest) {
       newsCount++;
     }
   } catch (err) {
-    errors.push(`News scraping failed: ${(err as Error).message}`);
+    errors.push(
+      process.env.NODE_ENV !== "production"
+        ? `News scraping failed: ${(err as Error).message}`
+        : "News scraping failed"
+    );
   }
 
   try {
@@ -78,7 +82,11 @@ export async function GET(request: NextRequest) {
       socialCount++;
     }
   } catch (err) {
-    errors.push(`Social scraping failed: ${(err as Error).message}`);
+    errors.push(
+      process.env.NODE_ENV !== "production"
+        ? `Social scraping failed: ${(err as Error).message}`
+        : "Social scraping failed"
+    );
   }
 
   // --- Step 2: Generate situation update ---
