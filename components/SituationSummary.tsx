@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { SituationUpdateData } from "@/lib/types";
+import { formatDistanceToNow } from "@/lib/formatDate";
 
 const severityConfig = {
   low: { label: "Low", className: "bg-green-900/40 text-green-400 border-green-700" },
@@ -16,7 +17,9 @@ interface Props {
 
 export default function SituationSummary({ initialUpdate }: Props) {
   const [update, setUpdate] = useState<SituationUpdateData | null>(initialUpdate ?? null);
-  const [loading, setLoading] = useState(false);
+  // Tick every minute so the relative "last updated" label stays current
+  const [tick, setTick] = useState(0);
+  void tick; // used only to trigger re-renders
 
   const fetchLatest = useCallback(async () => {
     try {
@@ -25,29 +28,20 @@ export default function SituationSummary({ initialUpdate }: Props) {
       const data = (await res.json()) as { updates: SituationUpdateData[] };
       if (data.updates?.length > 0) setUpdate(data.updates[0]);
     } catch {
-      // ignore
+      // ignore network errors silently
     }
   }, []);
 
   useEffect(() => {
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(fetchLatest, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    // Poll for a new update every 15 minutes (matching the cron interval)
+    const dataInterval = setInterval(fetchLatest, 15 * 60 * 1000);
+    // Re-render every minute so the relative timestamp stays fresh
+    const tickInterval = setInterval(() => setTick((t) => t + 1), 60 * 1000);
+    return () => {
+      clearInterval(dataInterval);
+      clearInterval(tickInterval);
+    };
   }, [fetchLatest]);
-
-  const handleGenerateUpdate = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/updates", { method: "POST" });
-      if (res.ok) {
-        await fetchLatest();
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const severity = update?.severity ?? "medium";
   const config = severityConfig[severity];
@@ -63,25 +57,11 @@ export default function SituationSummary({ initialUpdate }: Props) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          {update && (
-            <span className="text-xs text-zinc-500">
-              {new Date(update.generatedAt).toLocaleString([], {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          )}
-          <button
-            onClick={handleGenerateUpdate}
-            disabled={loading}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-zinc-600 hover:bg-zinc-700 disabled:opacity-50"
-          >
-            {loading ? "Generating…" : "Generate Update"}
-          </button>
-        </div>
+        {update && (
+          <span className="text-xs text-zinc-500">
+            Updated {formatDistanceToNow(update.generatedAt)}
+          </span>
+        )}
       </div>
 
       {update ? (
@@ -106,11 +86,9 @@ export default function SituationSummary({ initialUpdate }: Props) {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-8 text-center">
-          <p className="mb-3 text-sm text-zinc-500">
-            No situation update available yet.
-          </p>
+          <p className="mb-2 text-sm text-zinc-500">No situation update available yet.</p>
           <p className="text-xs text-zinc-600">
-            Click &quot;Generate Update&quot; to create an AI-powered summary from the latest news.
+            Updates are generated automatically every 15 minutes.
           </p>
         </div>
       )}

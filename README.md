@@ -6,10 +6,10 @@ A modern, real-time Next.js application that serves as a central information hub
 
 - **Live News Feed** — Aggregates articles from BBC, Reuters, AP News, Al Jazeera via Apify web scrapers
 - **X (Twitter) Monitoring** — Scrapes relevant posts using the Apify Twitter Scraper actor
-- **AI-Powered Situation Updates** — Uses OpenAI GPT-4o-mini to generate hourly situation briefings from the latest articles
+- **AI-Powered Situation Updates** — Uses OpenAI GPT-4o-mini to generate situation briefings from the latest articles, automatically every 15 minutes
 - **Travel Alerts** — Country-level safety information (UAE, Iran, Israel + more via DB)
 - **MongoDB Storage** — All scraped articles and generated updates are persisted in MongoDB
-- **Auto-refresh UI** — News feed refreshes every 2 minutes, situation updates every 5 minutes
+- **Auto-refresh UI** — News feed refreshes every 2 minutes; situation update panel polls every 15 minutes and always shows when the last update was generated
 - **Dark, minimalist UI** — Built with Tailwind CSS v4
 
 ## Tech Stack
@@ -44,7 +44,7 @@ cp .env.example .env.local
 | `MONGODB_URI`          | MongoDB connection string (Atlas recommended)  |
 | `APIFY_API_TOKEN`      | Apify API token from console.apify.com         |
 | `OPENAI_API_KEY`       | OpenAI API key from platform.openai.com        |
-| `CRON_SECRET`          | Optional secret to protect scrape endpoints    |
+| `CRON_SECRET`          | Secret used by Vercel Cron to authenticate the `/api/cron/update` endpoint |
 | `NEXT_PUBLIC_BASE_URL` | Your deployed URL (default: http://localhost:3000) |
 
 ### 3. Run the development server
@@ -57,55 +57,64 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 
 ## API Routes
 
-| Route            | Method | Description                                          |
-|------------------|--------|------------------------------------------------------|
-| `/api/news`      | GET    | Fetch paginated news articles (`?page=1&limit=20&category=news|social`) |
-| `/api/travel`    | GET    | Fetch active travel alerts                          |
-| `/api/updates`   | GET    | Fetch latest AI-generated situation updates          |
-| `/api/updates`   | POST   | Trigger a new AI situation update (requires `Authorization: Bearer <CRON_SECRET>`) |
-| `/api/scrape`    | POST   | Trigger Apify scraping (`type: "all"|"news"|"social"`, requires `Authorization: Bearer <CRON_SECRET>`) |
+| Route                | Method | Description                                          |
+|----------------------|--------|------------------------------------------------------|
+| `/api/news`          | GET    | Fetch paginated news articles (`?page=1&limit=20&category=news\|social`) |
+| `/api/travel`        | GET    | Fetch active travel alerts                           |
+| `/api/updates`       | GET    | Fetch latest AI-generated situation updates          |
+| `/api/cron/update`   | GET    | **Cron endpoint** — scrapes news + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Requires `Authorization: Bearer <CRON_SECRET>`. |
+| `/api/scrape`        | POST   | Manually trigger Apify scraping only (`type: "all"\|"news"\|"social"`, requires `Authorization: Bearer <CRON_SECRET>`) |
 
-## Automated Scraping & Updates
+## Automated Updates (Vercel Cron)
 
-To keep the app current, set up a cron job (e.g., via [Vercel Cron](https://vercel.com/docs/cron-jobs)) to call the scrape and update endpoints periodically:
+The `vercel.json` at the root of the project configures a Vercel Cron Job that calls `GET /api/cron/update` every 15 minutes:
 
-```bash
-# Scrape news every hour
-POST /api/scrape
-Authorization: Bearer <CRON_SECRET>
-Content-Type: application/json
-{"type": "all"}
-
-# Generate situation update after scraping
-POST /api/updates
-Authorization: Bearer <CRON_SECRET>
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/update",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}
 ```
+
+Each run:
+1. Scrapes fresh articles from BBC, Reuters, AP News, Al Jazeera, and X
+2. Generates a new AI situation briefing from the articles collected in that run
+3. Persists both to MongoDB
+
+The UI polls `/api/updates` every 15 minutes in the background and always displays **"Updated X ago"** so users know exactly how fresh the current briefing is.
 
 ## Project Structure
 
 ```
+├── vercel.json                     # Vercel Cron Job config (every 15 min)
 ├── app/
 │   ├── api/
-│   │   ├── news/route.ts       # News fetch API
-│   │   ├── scrape/route.ts     # Apify scraping trigger
-│   │   ├── travel/route.ts     # Travel alerts API
-│   │   └── updates/route.ts    # Situation updates API
+│   │   ├── cron/update/route.ts    # Cron endpoint: scrape + generate update
+│   │   ├── news/route.ts           # News fetch API
+│   │   ├── scrape/route.ts         # Manual Apify scraping trigger
+│   │   ├── travel/route.ts         # Travel alerts API
+│   │   └── updates/route.ts        # Situation updates read API
 │   ├── globals.css
 │   ├── layout.tsx
-│   └── page.tsx                # Main dashboard
+│   └── page.tsx                    # Main dashboard
 ├── components/
 │   ├── Header.tsx
-│   ├── LiveTicker.tsx          # Breaking news ticker
-│   ├── NewsFeed.tsx            # Live news list with filtering
-│   ├── SituationSummary.tsx    # AI-generated briefing panel
-│   └── TravelInfo.tsx          # Country-level travel alerts
+│   ├── LiveTicker.tsx              # Breaking news ticker
+│   ├── NewsFeed.tsx                # Live news list with filtering
+│   ├── SituationSummary.tsx        # AI-generated briefing panel (read-only, shows "Updated X ago")
+│   └── TravelInfo.tsx              # Country-level travel alerts
 └── lib/
-    ├── apify.ts                # Apify scraping helpers
-    ├── db.ts                   # MongoDB connection
-    ├── formatDate.ts           # Date utility
-    ├── openai.ts               # OpenAI generation helper
+    ├── apify.ts                    # Apify scraping helpers
+    ├── db.ts                       # MongoDB connection
+    ├── formatDate.ts               # Date utility
+    ├── openai.ts                   # OpenAI generation helper
+    ├── types.ts                    # Shared TypeScript interfaces
     └── models/
-        ├── Article.ts          # News article schema
-        ├── SituationUpdate.ts  # AI update schema
-        └── TravelAlert.ts      # Travel alert schema
+        ├── Article.ts              # News article schema
+        ├── SituationUpdate.ts      # AI update schema
+        └── TravelAlert.ts          # Travel alert schema
 ```
