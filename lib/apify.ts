@@ -21,7 +21,7 @@ function getApifyClient(): ApifyClient {
  */
 export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
   const apifyClient = getApifyClient();
-  const run = await apifyClient.actor("apify/web-scraper").call({
+  const pendingRun = await apifyClient.actor("apify/web-scraper").start({
     startUrls: [
       { url: "https://www.bbc.com/news/world/middle_east" },
       { url: "https://www.reuters.com/world/middle-east/" },
@@ -68,6 +68,11 @@ export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
     maxConcurrency: 5,
   });
 
+  // Wait up to 55 s so the function stays within the 60 s serverless limit.
+  const run = await apifyClient.run(pendingRun.id).waitForFinish({ waitSecs: 55 });
+  if (run.status !== "SUCCEEDED") {
+    throw new Error(`News scraper run did not finish in time (status: ${run.status})`);
+  }
   const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
   return (items as unknown as ScrapedArticle[]).filter(Boolean);
 }
@@ -78,7 +83,7 @@ export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
  */
 export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
   const apifyClient = getApifyClient();
-  const run = await apifyClient.actor("apidojo/tweet-scraper").call({
+  const pendingRun = await apifyClient.actor("apidojo/tweet-scraper").start({
     searchTerms: [
       "Iran war",
       "Iran attack",
@@ -90,6 +95,11 @@ export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
     addUserInfo: false,
   });
 
+  // Wait up to 55 s so the function stays within the 60 s serverless limit.
+  const run = await apifyClient.run(pendingRun.id).waitForFinish({ waitSecs: 55 });
+  if (run.status !== "SUCCEEDED") {
+    throw new Error(`Social scraper run did not finish in time (status: ${run.status})`);
+  }
   const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
 
   return items
