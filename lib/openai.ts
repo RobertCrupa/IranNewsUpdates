@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import { Agent, run } from "@openai/agents";
+import { z } from "zod";
 
 export interface ArticleContext {
   title: string;
@@ -14,10 +15,34 @@ export interface SituationSummaryResult {
   severity: "low" | "medium" | "high" | "critical";
 }
 
-function getOpenAIClient(): OpenAI {
+const situationSummarySchema = z.object({
+  title: z.string(),
+  summary: z.string(),
+  keyPoints: z.array(z.string()),
+  severity: z.enum(["low", "medium", "high", "critical"]),
+});
+
+const situationSummaryAgent = new Agent({
+  name: "IranSituationSummarizer",
+  model: process.env.OPENAI_SUMMARY_MODEL ?? "gpt-5-mini",
+  instructions: `You are an expert news analyst covering the Iran conflict and Middle East situation.
+
+Produce a factual, neutral, concise situation update from provided articles.
+Use only information present in the provided source content.
+Summary should be 2-3 short paragraphs and prioritize verifiable developments.
+Always provide exactly 5 key points.
+
+Severity guide:
+- low = minor developments
+- medium = significant escalation
+- high = major conflict
+- critical = imminent danger`,
+  outputType: situationSummarySchema,
+});
+
+function assertOpenAIKey(): void {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Please define the OPENAI_API_KEY environment variable");
-  return new OpenAI({ apiKey });
 }
 
 /**
@@ -26,7 +51,8 @@ function getOpenAIClient(): OpenAI {
 export async function generateSituationSummary(
   articles: ArticleContext[]
 ): Promise<SituationSummaryResult> {
-  const openai = getOpenAIClient();
+  assertOpenAIKey();
+
   const articlesText = articles
     .slice(0, 20)
     .map(
@@ -35,40 +61,30 @@ export async function generateSituationSummary(
     )
     .join("\n\n---\n\n");
 
-  const prompt = `You are an expert news analyst covering the Iran conflict and Middle East situation.
-
-Based on the following recent news articles, provide a comprehensive situation update.
+  const prompt = `Based on the following recent news articles, provide a comprehensive situation update.
 
 ARTICLES:
 ${articlesText}
 
-Respond ONLY with a valid JSON object in this exact format:
-{
-  "title": "Hourly Situation Update: [brief descriptive title]",
-  "summary": "A clear, factual 2-3 paragraph summary of the current situation",
-  "keyPoints": [
-    "Key development 1",
-    "Key development 2",
-    "Key development 3",
-    "Key development 4",
-    "Key development 5"
-  ],
-  "severity": "low|medium|high|critical"
-}
+Return structured output with:
+- title: "Hourly Situation Update: [brief descriptive title]"
+- summary
+- keyPoints (exactly 5 items)
+- severity`;
 
-Severity guide: low=minor developments, medium=significant escalation, high=major conflict, critical=imminent danger.
-Be factual, neutral, and concise. Focus on verified information from the sources provided.`;
-
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [{ role: "user", content: prompt }],
-    response_format: { type: "json_object" },
-    temperature: 0.3,
-    max_tokens: 1000,
+  const result = await run(situationSummaryAgent, prompt, {
+    context: {
+      articleCount: Math.min(articles.length, 20),
+      generatedAt: new Date().toISOString(),
+    },
   });
 
-  const content = completion.choices[0]?.message?.content;
-  if (!content) throw new Error("No response from OpenAI");
+  if (!result.finalOutput) throw new Error("No response from OpenAI agent");
 
-  return JSON.parse(content) as SituationSummaryResult;
+  const parsed = situationSummarySchema.safeParse(result.finalOutput);
+  if (!parsed.success) {
+    throw new Error(`Invalid structured output from OpenAI agent: ${parsed.error.message}`);
+  }
+
+  return parsed.data;
 }
