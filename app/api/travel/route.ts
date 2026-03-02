@@ -8,9 +8,32 @@ export async function GET() {
   try {
     await connectDB();
 
-    const alerts = await TravelAlert.find({ isActive: true })
-      .sort({ alertLevel: -1, updatedAt: -1 })
-      .lean();
+    const alerts = await TravelAlert.aggregate([
+      {
+        $match: { isActive: true },
+      },
+      {
+        $addFields: {
+          severityRank: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$alertLevel", "red"] }, then: 4 },
+                { case: { $eq: ["$alertLevel", "amber"] }, then: 3 },
+                { case: { $eq: ["$alertLevel", "yellow"] }, then: 2 },
+                { case: { $eq: ["$alertLevel", "green"] }, then: 1 },
+              ],
+              default: 0,
+            },
+          },
+        },
+      },
+      {
+        $sort: { severityRank: -1, updatedAt: -1 },
+      },
+      {
+        $project: { severityRank: 0 },
+      },
+    ]);
 
     return NextResponse.json({ alerts });
   } catch (err) {
