@@ -3,11 +3,14 @@ import { connectDB } from "@/lib/db";
 import SituationUpdate from "@/lib/models/SituationUpdate";
 import Article from "@/lib/models/Article";
 import { generateSituationSummary } from "@/lib/openai";
+import { logger } from "@/lib/logger";
+import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function GET() {
+  const startedAt = Date.now();
   try {
     await connectDB();
 
@@ -16,9 +19,17 @@ export async function GET() {
       .limit(10)
       .lean();
 
+    logger.info("api/updates", "Fetched updates", {
+      count: updates.length,
+      durationMs: Date.now() - startedAt,
+    });
+
     return NextResponse.json({ updates });
   } catch (err) {
-    console.error("Updates fetch error:", err);
+    logger.error("api/updates", "Updates fetch error", {
+      message: (err as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     return NextResponse.json(
       {
         error: "Internal server error",
@@ -30,10 +41,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    if (!isAuthorizedCronRequest(request, "api/updates")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -48,7 +58,12 @@ export async function POST(request: NextRequest) {
       .limit(20)
       .lean();
 
+    logger.info("api/updates", "Recent articles selected for generation", {
+      count: recentArticles.length,
+    });
+
     if (recentArticles.length === 0) {
+      logger.warn("api/updates", "No recent articles found for generation");
       return NextResponse.json(
         { error: "No recent articles found to generate update from" },
         { status: 400 }
@@ -73,9 +88,18 @@ export async function POST(request: NextRequest) {
       sourceArticleIds: recentArticles.map((a) => a._id),
     });
 
+    logger.info("api/updates", "Generated and stored update", {
+      severity: update.severity,
+      keyPoints: update.keyPoints.length,
+      durationMs: Date.now() - startedAt,
+    });
+
     return NextResponse.json({ success: true, update });
   } catch (err) {
-    console.error("Update generation error:", err);
+    logger.error("api/updates", "Update generation error", {
+      message: (err as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     return NextResponse.json(
       {
         error: "Internal server error",

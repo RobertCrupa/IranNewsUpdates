@@ -1,5 +1,6 @@
 import { Agent, run } from "@openai/agents";
 import { z } from "zod";
+import { logger } from "@/lib/logger";
 
 export interface ArticleContext {
   title: string;
@@ -51,7 +52,12 @@ function assertOpenAIKey(): void {
 export async function generateSituationSummary(
   articles: ArticleContext[]
 ): Promise<SituationSummaryResult> {
+  const startedAt = Date.now();
   assertOpenAIKey();
+  logger.info("openai", "Generating situation summary", {
+    articleCount: Math.min(articles.length, 20),
+    model: process.env.OPENAI_SUMMARY_MODEL ?? "gpt-5-mini",
+  });
 
   const articlesText = articles
     .slice(0, 20)
@@ -85,6 +91,12 @@ Return structured output with:
   if (!parsed.success) {
     throw new Error(`Invalid structured output from OpenAI agent: ${parsed.error.message}`);
   }
+
+  logger.info("openai", "Situation summary generated", {
+    durationMs: Date.now() - startedAt,
+    severity: parsed.data.severity,
+    keyPoints: parsed.data.keyPoints.length,
+  });
 
   return parsed.data;
 }

@@ -2,16 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Article from "@/lib/models/Article";
 import { scrapeNewsArticles, scrapeXPosts } from "@/lib/apify";
+import { logger } from "@/lib/logger";
+import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     // Validate secret to prevent unauthorized scraping triggers
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    if (!isAuthorizedCronRequest(request, "api/scrape")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json().catch(() => ({}))) as { type?: string };
     const type = body.type ?? "all";
+    logger.info("api/scrape", "Scrape requested", { type });
 
     const results = { newsCount: 0, socialCount: 0, errors: [] as string[] };
 
@@ -42,7 +44,11 @@ export async function POST(request: NextRequest) {
           );
           results.newsCount++;
         }
+        logger.info("api/scrape", "News persisted", { count: results.newsCount });
       } catch (err) {
+        logger.error("api/scrape", "News scraping failed", {
+          message: (err as Error).message,
+        });
         results.errors.push(
           process.env.NODE_ENV !== "production"
             ? `News scraping failed: ${(err as Error).message}`
@@ -70,7 +76,11 @@ export async function POST(request: NextRequest) {
           );
           results.socialCount++;
         }
+        logger.info("api/scrape", "Social persisted", { count: results.socialCount });
       } catch (err) {
+        logger.error("api/scrape", "Social scraping failed", {
+          message: (err as Error).message,
+        });
         results.errors.push(
           process.env.NODE_ENV !== "production"
             ? `Social scraping failed: ${(err as Error).message}`
@@ -82,10 +92,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: `Scraped ${results.newsCount} news articles and ${results.socialCount} social posts`,
+      durationMs: Date.now() - startedAt,
       ...results,
     });
   } catch (err) {
-    console.error("Scrape error:", err);
+    logger.error("api/scrape", "Scrape error", {
+      message: (err as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     return NextResponse.json(
       {
         error: "Internal server error",

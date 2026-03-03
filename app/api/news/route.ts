@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Article from "@/lib/models/Article";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     await connectDB();
 
@@ -19,6 +21,12 @@ export async function GET(request: NextRequest) {
       filter.category = category;
     }
 
+    logger.debug("api/news", "Fetching news", {
+      page,
+      limit,
+      category: category ?? "all",
+    });
+
     const [articles, total] = await Promise.all([
       Article.find(filter)
         .sort({ publishedAt: -1 })
@@ -27,6 +35,12 @@ export async function GET(request: NextRequest) {
         .lean(),
       Article.countDocuments(filter),
     ]);
+
+    logger.info("api/news", "Fetched news", {
+      count: articles.length,
+      total,
+      durationMs: Date.now() - startedAt,
+    });
 
     return NextResponse.json({
       articles,
@@ -38,7 +52,10 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("News fetch error:", err);
+    logger.error("api/news", "News fetch error", {
+      message: (err as Error).message,
+      durationMs: Date.now() - startedAt,
+    });
     return NextResponse.json(
       {
         error: "Internal server error",

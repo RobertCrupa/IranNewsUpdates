@@ -46,6 +46,7 @@ cp .env.example .env.local
 | `OPENAI_API_KEY`       | OpenAI API key from platform.openai.com        |
 | `CRON_SECRET`          | Secret used by Vercel Cron to authenticate the `/api/cron/update` endpoint |
 | `NEXT_PUBLIC_BASE_URL` | Your deployed URL (default: http://localhost:3000) |
+| `LOG_LEVEL`            | Optional log level (`debug`, `info`, `warn`, `error`) |
 
 ### 3. Run the development server
 
@@ -55,6 +56,18 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) to view the app.
 
+### Local ingestion trigger (important)
+
+In local development, Vercel Cron does not run automatically, so the database will remain empty until you trigger ingestion.
+
+Run this once after starting the app:
+
+```bash
+curl -i http://localhost:3000/api/cron/update
+```
+
+In development mode, the cron/scrape/update write endpoints accept requests without the auth header to simplify local testing. In production, `CRON_SECRET` auth is enforced.
+
 ## API Routes
 
 | Route                | Method | Description                                          |
@@ -62,8 +75,8 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 | `/api/news`          | GET    | Fetch paginated news articles (`?page=1&limit=20&category=news\|social`) |
 | `/api/travel`        | GET    | Fetch active travel alerts                           |
 | `/api/updates`       | GET    | Fetch latest AI-generated situation updates          |
-| `/api/cron/update`   | GET    | **Cron endpoint** — scrapes news + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Requires `Authorization: Bearer <CRON_SECRET>`. |
-| `/api/scrape`        | POST   | Manually trigger Apify scraping only (`type: "all"\|"news"\|"social"`, requires `Authorization: Bearer <CRON_SECRET>`) |
+| `/api/cron/update`   | GET    | **Cron endpoint** — scrapes news + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Auth required in production; local dev allows no-auth calls. |
+| `/api/scrape`        | POST   | Manually trigger Apify scraping only (`type: "all"\|"news"\|"social"`). Auth required in production; local dev allows no-auth calls. |
 
 ## Automated Updates (Vercel Cron)
 

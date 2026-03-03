@@ -1,4 +1,4 @@
-import { ApifyClient } from "apify-client";
+import { logger } from "@/lib/logger";
 
 export interface ScrapedArticle {
   title: string;
@@ -9,10 +9,82 @@ export interface ScrapedArticle {
   imageUrl?: string;
 }
 
-function getApifyClient(): ApifyClient {
+interface ApifyRun {
+  id: string;
+  status: string;
+  defaultDatasetId: string;
+}
+
+function getApifyToken(): string {
   const token = process.env.APIFY_API_TOKEN;
   if (!token) throw new Error("Please define the APIFY_API_TOKEN environment variable");
-  return new ApifyClient({ token });
+  return token;
+}
+
+function actorPath(actorId: string): string {
+  return actorId.replace("/", "~");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function startActorRun(actorId: string, input: Record<string, unknown>): Promise<ApifyRun> {
+  const token = getApifyToken();
+  const url = `https://api.apify.com/v2/acts/${actorPath(actorId)}/runs?token=${token}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Apify start run failed (${res.status}): ${text.slice(0, 400)}`);
+  }
+
+  const body = (await res.json()) as { data: ApifyRun };
+  return body.data;
+}
+
+async function waitForRunFinish(runId: string, waitMs = 55_000): Promise<ApifyRun> {
+  const token = getApifyToken();
+  const started = Date.now();
+
+  while (Date.now() - started < waitMs) {
+    const res = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Apify run status failed (${res.status}): ${text.slice(0, 300)}`);
+    }
+
+    const body = (await res.json()) as { data: ApifyRun };
+    const run = body.data;
+    if (["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"].includes(run.status)) {
+      return run;
+    }
+
+    await sleep(2000);
+  }
+
+  throw new Error("Apify run did not finish within timeout window");
+}
+
+async function getDatasetItems(datasetId: string): Promise<Record<string, unknown>[]> {
+  const token = getApifyToken();
+  const url = `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&format=json`;
+  const res = await fetch(url, { method: "GET", cache: "no-store" });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Apify dataset read failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+
+  return (await res.json()) as Record<string, unknown>[];
 }
 
 /**
@@ -20,8 +92,9 @@ function getApifyClient(): ApifyClient {
  * using the Apify Web Scraper actor.
  */
 export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
-  const apifyClient = getApifyClient();
-  const pendingRun = await apifyClient.actor("apify/web-scraper").start({
+  const startedAt = Date.now();
+  logger.info("apify/news", "Starting news scrape");
+  const pendingRun = await startActorRun("apify/web-scraper", {
     startUrls: [
       { url: "https://www.bbc.com/news/world/middle_east" },
       { url: "https://www.reuters.com/world/middle-east/" },
@@ -69,12 +142,19 @@ export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
   });
 
   // Wait up to 55 s so the function stays within the 60 s serverless limit.
-  const run = await apifyClient.run(pendingRun.id).waitForFinish({ waitSecs: 55 });
+  const run = await waitForRunFinish(pendingRun.id, 55_000);
+  logger.info("apify/news", "News actor finished", {
+    runId: run.id,
+    status: run.status,
+    durationMs: Date.now() - startedAt,
+  });
   if (run.status !== "SUCCEEDED") {
     throw new Error(`News scraper run did not finish in time (status: ${run.status})`);
   }
-  const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
-  return (items as unknown as ScrapedArticle[]).filter(Boolean);
+  const items = await getDatasetItems(run.defaultDatasetId);
+  const mapped = (items as unknown as ScrapedArticle[]).filter(Boolean);
+  logger.info("apify/news", "News items collected", { count: mapped.length });
+  return mapped;
 }
 
 /**
@@ -82,8 +162,9 @@ export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
  * Uses the Apify Tweet Scraper actor.
  */
 export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
-  const apifyClient = getApifyClient();
-  const pendingRun = await apifyClient.actor("apidojo/tweet-scraper").start({
+  const startedAt = Date.now();
+  logger.info("apify/social", "Starting X scrape");
+  const pendingRun = await startActorRun("apidojo/tweet-scraper", {
     searchTerms: [
       "Iran war",
       "Iran attack",
@@ -96,13 +177,18 @@ export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
   });
 
   // Wait up to 55 s so the function stays within the 60 s serverless limit.
-  const run = await apifyClient.run(pendingRun.id).waitForFinish({ waitSecs: 55 });
+  const run = await waitForRunFinish(pendingRun.id, 55_000);
+  logger.info("apify/social", "X actor finished", {
+    runId: run.id,
+    status: run.status,
+    durationMs: Date.now() - startedAt,
+  });
   if (run.status !== "SUCCEEDED") {
     throw new Error(`Social scraper run did not finish in time (status: ${run.status})`);
   }
-  const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+  const items = await getDatasetItems(run.defaultDatasetId);
 
-  return items
+  const mapped = items
     .filter((item: Record<string, unknown>) => item && (item.full_text || item.text))
     .map((item: Record<string, unknown>) => ({
       title: ((item.full_text as string) || (item.text as string) || "").slice(0, 100),
@@ -111,4 +197,7 @@ export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
       content: (item.full_text as string) || (item.text as string) || "",
       publishedAt: (item.created_at as string) || new Date().toISOString(),
     }));
+
+  logger.info("apify/social", "Social items collected", { count: mapped.length });
+  return mapped;
 }
