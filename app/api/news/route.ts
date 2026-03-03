@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Article from "@/lib/models/Article";
 import { logger } from "@/lib/logger";
+import { OFFICIAL_CATEGORIES, type OfficialCategory } from "@/lib/sources";
 
 export const runtime = "nodejs";
 
@@ -16,9 +17,13 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category");
     const skip = (page - 1) * limit;
 
-    const filter: Record<string, string> = {};
-    if (category === "news" || category === "social") {
+    const filter: Record<string, string | { $in: string[] }> = {};
+    if (category && OFFICIAL_CATEGORIES.includes(category as OfficialCategory)) {
       filter.category = category;
+    } else if (category === "social") {
+      filter.category = { $in: [...OFFICIAL_CATEGORIES] };
+    } else if (category === "news") {
+      filter.category = "news";
     }
 
     logger.debug("api/news", "Fetching news", {

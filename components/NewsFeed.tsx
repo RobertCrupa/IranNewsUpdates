@@ -3,22 +3,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "@/lib/formatDate";
 import type { ArticleData } from "@/lib/types";
+import { CATEGORY_LABELS, OFFICIAL_CATEGORIES, type OfficialCategory } from "@/lib/sources";
 
 interface Props {
   initialArticles?: ArticleData[];
 }
 
 const sourceColors: Record<string, string> = {
-  "bbc.com": "bg-red-900/30 text-red-400",
-  "reuters.com": "bg-orange-900/30 text-orange-400",
-  "apnews.com": "bg-blue-900/30 text-blue-400",
-  "aljazeera.com": "bg-green-900/30 text-green-400",
   "x.com": "bg-sky-900/30 text-sky-400",
 };
 
+const categoryBadgeStyles: Record<OfficialCategory, string> = {
+  airline: "bg-indigo-900/30 text-indigo-400",
+  government: "bg-emerald-900/30 text-emerald-400",
+  "civil-aviation": "bg-amber-900/30 text-amber-400",
+  embassy: "bg-purple-900/30 text-purple-400",
+};
+
+const filterOptions = ["all", ...OFFICIAL_CATEGORIES] as const;
+type FeedFilter = (typeof filterOptions)[number];
+
 export default function NewsFeed({ initialArticles = [] }: Props) {
   const [articles, setArticles] = useState<ArticleData[]>(initialArticles);
-  const [filter, setFilter] = useState<"all" | "news" | "social">("all");
+  const [filter, setFilter] = useState<FeedFilter>("all");
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -70,25 +77,24 @@ export default function NewsFeed({ initialArticles = [] }: Props) {
     return () => clearInterval(interval);
   }, [filter, fetchArticles]);
 
-  const getSourceColor = (source: string) =>
-    sourceColors[source] ?? "bg-zinc-800 text-zinc-400";
+  const getSourceColor = (source: string) => sourceColors[source] ?? "bg-zinc-800 text-zinc-400";
 
   return (
     <section id="news" className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Live News Feed</h2>
         <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-          {(["all", "news", "social"] as const).map((f) => (
+          {filterOptions.map((f) => (
             <button
               key={f}
               onClick={() => handleFilterChange(f)}
-              className={`rounded-md px-3 py-1 text-xs font-medium capitalize transition ${
+              className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                 filter === f
                   ? "bg-zinc-700 text-white"
                   : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {f}
+              {f === "all" ? "All" : CATEGORY_LABELS[f]}
             </button>
           ))}
         </div>
@@ -114,9 +120,13 @@ export default function NewsFeed({ initialArticles = [] }: Props) {
                 <span className={`rounded px-2 py-0.5 text-xs font-medium ${getSourceColor(article.source)}`}>
                   {article.source}
                 </span>
-                {article.category === "social" && (
-                  <span className="rounded bg-sky-900/30 px-2 py-0.5 text-xs text-sky-400">
-                    𝕏 Post
+                {OFFICIAL_CATEGORIES.includes(article.category as OfficialCategory) && (
+                  <span
+                    className={`rounded px-2 py-0.5 text-xs ${
+                      categoryBadgeStyles[article.category as OfficialCategory]
+                    }`}
+                  >
+                    {CATEGORY_LABELS[article.category as OfficialCategory]}
                   </span>
                 )}
               </div>

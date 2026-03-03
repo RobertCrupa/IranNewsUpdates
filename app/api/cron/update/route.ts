@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Article from "@/lib/models/Article";
 import SituationUpdate from "@/lib/models/SituationUpdate";
-import { scrapeNewsArticles, scrapeXPosts } from "@/lib/apify";
+import { scrapeXPosts } from "@/lib/apify";
 import { generateSituationSummary } from "@/lib/openai";
 import { logger } from "@/lib/logger";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
+import { OFFICIAL_CATEGORIES } from "@/lib/sources";
+import { Types } from "mongoose";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -21,7 +23,7 @@ const CRON_INTERVAL_MS = 15 * 60 * 1000;
  * endpoint rejects any unauthenticated request when CRON_SECRET is set.
  *
  * Steps:
- *  1. Scrape fresh articles from news sources and X
+ *  1. Scrape fresh posts from official X accounts
  *  2. Generate a new AI situation summary from the latest articles
  */
 export async function GET(request: NextRequest) {
@@ -51,44 +53,15 @@ export async function GET(request: NextRequest) {
   }
 
   const errors: string[] = [];
-  let newsCount = 0;
-  let socialCount = 0;
+  const categoryCounts = Object.fromEntries(OFFICIAL_CATEGORIES.map((category) => [category, 0])) as Record<
+    (typeof OFFICIAL_CATEGORIES)[number],
+    number
+  >;
+  let totalCount = 0;
 
   // --- Step 1: Scrape ---
   try {
-    logger.info("api/cron/update", "Scraping news articles");
-    const articles = await scrapeNewsArticles();
-    for (const article of articles) {
-      await Article.findOneAndUpdate(
-        { url: article.url },
-        {
-          title: article.title,
-          url: article.url,
-          source: article.source,
-          content: article.content,
-          publishedAt: new Date(article.publishedAt),
-          category: "news",
-          imageUrl: article.imageUrl,
-          scrapedAt: new Date(),
-        },
-        { upsert: true, new: true }
-      );
-      newsCount++;
-    }
-    logger.info("api/cron/update", "News scrape persisted", { count: newsCount });
-  } catch (err) {
-    logger.error("api/cron/update", "News scraping failed", {
-      message: (err as Error).message,
-    });
-    errors.push(
-      process.env.NODE_ENV !== "production"
-        ? `News scraping failed: ${(err as Error).message}`
-        : "News scraping failed"
-    );
-  }
-
-  try {
-    logger.info("api/cron/update", "Scraping social posts");
+    logger.info("api/cron/update", "Scraping official X posts");
     const posts = await scrapeXPosts();
     for (const post of posts) {
       await Article.findOneAndUpdate(
@@ -99,36 +72,41 @@ export async function GET(request: NextRequest) {
           source: post.source,
           content: post.content,
           publishedAt: new Date(post.publishedAt),
-          category: "social",
+          category: post.category,
+          imageUrl: post.imageUrl,
           scrapedAt: new Date(),
         },
         { upsert: true, new: true }
       );
-      socialCount++;
+      categoryCounts[post.category] += 1;
+      totalCount++;
     }
-    logger.info("api/cron/update", "Social scrape persisted", { count: socialCount });
+    logger.info("api/cron/update", "Official X posts persisted", {
+      totalCount,
+      categoryCounts,
+    });
   } catch (err) {
-    logger.error("api/cron/update", "Social scraping failed", {
+    logger.error("api/cron/update", "Official X scraping failed", {
       message: (err as Error).message,
     });
     errors.push(
       process.env.NODE_ENV !== "production"
-        ? `Social scraping failed: ${(err as Error).message}`
-        : "Social scraping failed"
+        ? `Official X scraping failed: ${(err as Error).message}`
+        : "Official X scraping failed"
     );
   }
 
-  if (newsCount === 0 && socialCount === 0) {
-    logger.warn("api/cron/update", "No items scraped from any source", {
+  if (totalCount === 0) {
+    logger.warn("api/cron/update", "No items scraped from official accounts", {
       errors,
       durationMs: Date.now() - startedAt,
     });
     return NextResponse.json(
       {
         success: false,
-        message: "Scraping failed for all sources",
-        newsCount,
-        socialCount,
+        message: "Scraping failed for all official accounts",
+        totalCount,
+        categoryCounts,
         errors,
       },
       { status: 502 }
@@ -138,7 +116,7 @@ export async function GET(request: NextRequest) {
   // --- Step 2: Generate situation update ---
   const fifteenMinutesAgo = new Date(Date.now() - CRON_INTERVAL_MS);
   let recentArticles: Array<{
-    _id: unknown;
+    _id: Types.ObjectId;
     title: string;
     source: string;
     content: string;
@@ -155,15 +133,15 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     logger.error("api/cron/update", "Failed querying recent articles", {
       message: (err as Error).message,
-      newsCount,
-      socialCount,
+      totalCount,
+      categoryCounts,
       durationMs: Date.now() - startedAt,
     });
     return NextResponse.json(
       {
         error: "Failed querying recent articles",
-        newsCount,
-        socialCount,
+        totalCount,
+        categoryCounts,
         errors,
         ...(process.env.NODE_ENV !== "production" && {
           details: (err as Error).message,
@@ -179,15 +157,15 @@ export async function GET(request: NextRequest) {
 
   if (recentArticles.length === 0) {
     logger.warn("api/cron/update", "No recent articles found for summary", {
-      newsCount,
-      socialCount,
+      totalCount,
+      categoryCounts,
       durationMs: Date.now() - startedAt,
     });
     return NextResponse.json({
       success: true,
       message: "Scraping complete but no new articles found for summary",
-      newsCount,
-      socialCount,
+      totalCount,
+      categoryCounts,
       errors,
     });
   }
@@ -211,8 +189,8 @@ export async function GET(request: NextRequest) {
   });
 
   logger.info("api/cron/update", "Situation update generated and saved", {
-    newsCount,
-    socialCount,
+    totalCount,
+    categoryCounts,
     errorsCount: errors.length,
     severity: result.severity,
     durationMs: Date.now() - startedAt,
@@ -220,9 +198,9 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    message: `Scraped ${newsCount} news + ${socialCount} social articles and generated new situation update`,
-    newsCount,
-    socialCount,
+    message: `Scraped ${totalCount} official X updates and generated new situation update`,
+    totalCount,
+    categoryCounts,
     errors,
   });
 }

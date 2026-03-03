@@ -4,9 +4,9 @@ A modern, real-time Next.js application that serves as a central information hub
 
 ## Features
 
-- **Live News Feed** — Aggregates articles from BBC, Reuters, AP News, Al Jazeera via Apify web scrapers
-- **X (Twitter) Monitoring** — Scrapes relevant posts using the Apify Twitter Scraper actor
-- **AI-Powered Situation Updates** — Uses OpenAI GPT-4o-mini to generate situation briefings from the latest articles, automatically every 15 minutes
+- **Official Source Feed** — Tracks updates from official X accounts across airlines, governments, civil aviation authorities, and embassies
+- **X (Twitter) Monitoring** — Uses the Apify Tweet Scraper actor, restricted to official account posts only (no reposts/replies/quotes)
+- **AI-Powered Situation Updates** — Uses OpenAI GPT-5-mini to generate situation briefings from the latest articles, automatically every 15 minutes
 - **Travel Alerts** — Country-level safety information (UAE, Iran, Israel + more via DB)
 - **MongoDB Storage** — All scraped articles and generated updates are persisted in MongoDB
 - **Auto-refresh UI** — News feed refreshes every 2 minutes; situation update panel polls every 15 minutes and always shows when the last update was generated
@@ -14,14 +14,14 @@ A modern, real-time Next.js application that serves as a central information hub
 
 ## Tech Stack
 
-| Layer     | Technology                |
-| --------- | ------------------------- |
-| Framework | Next.js 16 (App Router)   |
-| Language  | TypeScript                |
-| Styling   | Tailwind CSS v4           |
-| Database  | MongoDB via Mongoose      |
-| Scraping  | Apify (Cheerio + Twitter) |
-| AI/LLM    | OpenAI GPT-4o-mini        |
+| Layer     | Technology              |
+| --------- | ----------------------- |
+| Framework | Next.js 16 (App Router) |
+| Language  | TypeScript              |
+| Styling   | Tailwind CSS v4         |
+| Database  | MongoDB via Mongoose    |
+| Scraping  | Apify (Twitter/X)       |
+| AI/LLM    | OpenAI GPT-5-mini       |
 
 ## Getting Started
 
@@ -70,13 +70,13 @@ In development mode, the cron/scrape/update write endpoints accept requests with
 
 ## API Routes
 
-| Route              | Method | Description                                                                                                                                                                         |
-| ------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/news`        | GET    | Fetch paginated news articles (`?page=1&limit=20&category=news\|social`)                                                                                                            |
-| `/api/travel`      | GET    | Fetch active travel alerts                                                                                                                                                          |
-| `/api/updates`     | GET    | Fetch latest AI-generated situation updates                                                                                                                                         |
-| `/api/cron/update` | GET    | **Cron endpoint** — scrapes news + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Auth required in production; local dev allows no-auth calls. |
-| `/api/scrape`      | POST   | Manually trigger Apify scraping only (`type: "all"\|"news"\|"social"`). Auth required in production; local dev allows no-auth calls.                                                |
+| Route              | Method | Description                                                                                                                                                                                                        |
+| ------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/api/news`        | GET    | Fetch paginated articles (`?page=1&limit=20&category=airline\|government\|civil-aviation\|embassy`)                                                                                                                |
+| `/api/travel`      | GET    | Fetch active travel alerts                                                                                                                                                                                         |
+| `/api/updates`     | GET    | Fetch latest AI-generated situation updates                                                                                                                                                                        |
+| `/api/cron/update` | GET    | **Cron endpoint** — scrapes official X accounts + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Auth required in production; local dev allows no-auth calls.                 |
+| `/api/scrape`      | POST   | Manually trigger official X scraping (`type: "all"\|"social"\|"airline"\|"government"\|"civil-aviation"\|"embassy"`, or `category` with same values). Auth required in production; local dev allows no-auth calls. |
 
 ## Automated Updates (Vercel Cron)
 
@@ -95,7 +95,7 @@ The `vercel.json` at the root of the project configures a Vercel Cron Job that c
 
 Each run:
 
-1. Scrapes fresh articles from BBC, Reuters, AP News, Al Jazeera, and X
+1. Scrapes fresh posts from configured official X accounts
 2. Generates a new AI situation briefing from the articles collected in that run
 3. Persists both to MongoDB
 
@@ -109,7 +109,7 @@ The UI polls `/api/updates` every 15 minutes in the background and always displa
 │   ├── api/
 │   │   ├── cron/update/route.ts    # Cron endpoint: scrape + generate update
 │   │   ├── news/route.ts           # News fetch API
-│   │   ├── scrape/route.ts         # Manual Apify scraping trigger
+│   │   ├── scrape/route.ts         # Manual official X scraping trigger
 │   │   ├── travel/route.ts         # Travel alerts API
 │   │   └── updates/route.ts        # Situation updates read API
 │   ├── globals.css
@@ -122,7 +122,7 @@ The UI polls `/api/updates` every 15 minutes in the background and always displa
 │   ├── SituationSummary.tsx        # AI-generated briefing panel (read-only, shows "Updated X ago")
 │   └── TravelInfo.tsx              # Country-level travel alerts
 └── lib/
-    ├── apify.ts                    # Apify scraping helpers
+    ├── apify.ts                    # Apify X scraping helpers
     ├── db.ts                       # MongoDB connection
     ├── formatDate.ts               # Date utility
     ├── openai.ts                   # OpenAI generation helper

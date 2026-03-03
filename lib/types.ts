@@ -1,5 +1,7 @@
 // Shared TypeScript types used across components and API responses
 
+import type { ArticleCategory } from "@/lib/sources";
+
 export interface ArticleData {
   _id: string;
   title: string;
@@ -7,7 +9,7 @@ export interface ArticleData {
   source: string;
   content: string;
   publishedAt: string;
-  category: "news" | "social";
+  category: ArticleCategory;
   imageUrl?: string;
 }
 

@@ -1,4 +1,10 @@
 import { logger } from "@/lib/logger";
+import {
+  getOfficialAccounts,
+  normalizeHandle,
+  resolveCategoryFromHandle,
+  type OfficialCategory,
+} from "@/lib/sources";
 
 export interface ScrapedArticle {
   title: string;
@@ -6,6 +12,7 @@ export interface ScrapedArticle {
   source: string;
   content: string;
   publishedAt: string;
+  category: OfficialCategory;
   imageUrl?: string;
 }
 
@@ -87,91 +94,54 @@ async function getDatasetItems(datasetId: string): Promise<Record<string, unknow
   return (await res.json()) as Record<string, unknown>[];
 }
 
-/**
- * Scrapes news articles from trusted sources about the Iran situation
- * using the Apify Web Scraper actor.
- */
-export async function scrapeNewsArticles(): Promise<ScrapedArticle[]> {
-  const startedAt = Date.now();
-  logger.info("apify/news", "Starting news scrape");
-  const pendingRun = await startActorRun("apify/web-scraper", {
-    startUrls: [
-      { url: "https://www.bbc.com/news/world/middle_east" },
-      { url: "https://www.reuters.com/world/middle-east/" },
-      { url: "https://apnews.com/hub/iran" },
-      { url: "https://www.aljazeera.com/tag/iran/" },
-    ],
-    pseudoUrls: [
-      "https://www.bbc.com/news/[.*]",
-      "https://www.reuters.com/world/middle-east/[.*]",
-      "https://apnews.com/article/[.*]",
-      "https://www.aljazeera.com/news/[.*]",
-    ],
-    pageFunction: `async function pageFunction(context) {
-      const { $, request, log } = context;
-      const url = request.url;
+function inferHandleFromItem(item: Record<string, unknown>): string | null {
+  const candidates = [
+    item.userName,
+    item.username,
+    item.screen_name,
+    (item.author as Record<string, unknown> | undefined)?.userName,
+    (item.author as Record<string, unknown> | undefined)?.username,
+    (item.author as Record<string, unknown> | undefined)?.screen_name,
+    (item.user as Record<string, unknown> | undefined)?.userName,
+    (item.user as Record<string, unknown> | undefined)?.username,
+    (item.user as Record<string, unknown> | undefined)?.screen_name,
+  ];
 
-      let title = $('h1').first().text().trim() || $('title').text().trim();
-      let content = '';
-      let publishedAt = new Date().toISOString();
-      let imageUrl = $('meta[property="og:image"]').attr('content') || '';
-
-      // Extract article body paragraphs
-      $('article p, .article-body p, .story-body p, [data-testid="article-body"] p').each((_, el) => {
-        content += $(el).text().trim() + ' ';
-      });
-
-      // Try to get published date
-      const dateEl = $('time').first();
-      if (dateEl.attr('datetime')) {
-        publishedAt = dateEl.attr('datetime');
-      } else {
-        const metaDate = $('meta[property="article:published_time"]').attr('content')
-          || $('meta[name="pubdate"]').attr('content');
-        if (metaDate) publishedAt = metaDate;
-      }
-
-      const hostname = new URL(url).hostname.replace('www.', '');
-
-      if (!title || title.length < 5) return null;
-
-      return { title, url, source: hostname, content: content.trim().slice(0, 2000), publishedAt, imageUrl };
-    }`,
-    maxRequestsPerCrawl: 50,
-    maxConcurrency: 5,
-  });
-
-  // Wait up to 55 s so the function stays within the 60 s serverless limit.
-  const run = await waitForRunFinish(pendingRun.id, 55_000);
-  logger.info("apify/news", "News actor finished", {
-    runId: run.id,
-    status: run.status,
-    durationMs: Date.now() - startedAt,
-  });
-  if (run.status !== "SUCCEEDED") {
-    throw new Error(`News scraper run did not finish in time (status: ${run.status})`);
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return normalizeHandle(candidate);
+    }
   }
-  const items = await getDatasetItems(run.defaultDatasetId);
-  const mapped = (items as unknown as ScrapedArticle[]).filter(Boolean);
-  logger.info("apify/news", "News items collected", { count: mapped.length });
-  return mapped;
+
+  const url = typeof item.url === "string" ? item.url : "";
+  const match = url.match(/x\.com\/([^/]+)\/status\//i);
+  if (match?.[1]) {
+    return normalizeHandle(match[1]);
+  }
+
+  return null;
+}
+
+function isOriginalPost(item: Record<string, unknown>): boolean {
+  const retweet = Boolean(item.isRetweet ?? item.retweeted ?? item.is_repost ?? item.isRepost);
+  const reply = Boolean(item.isReply ?? item.inReplyToStatusId ?? item.in_reply_to_status_id);
+  const quote = Boolean(item.isQuote ?? item.isQuoteStatus ?? item.quoted_status_id);
+  const text = String(item.full_text ?? item.text ?? "");
+  return !retweet && !reply && !quote && !text.startsWith("RT @");
 }
 
 /**
- * Scrapes X (Twitter) for latest Iran-related posts.
+ * Scrapes X (Twitter) for latest updates from configured official accounts.
  * Uses the Apify Tweet Scraper actor.
  */
-export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
+export async function scrapeXPosts(category?: OfficialCategory): Promise<ScrapedArticle[]> {
+  const accounts = getOfficialAccounts(category);
+  const searchTerms = accounts.map((handle) => `from:${handle} -is:retweet -is:reply -is:quote`);
+
   const startedAt = Date.now();
   logger.info("apify/social", "Starting X scrape");
   const pendingRun = await startActorRun("apidojo/tweet-scraper", {
-    searchTerms: [
-      "Iran war",
-      "Iran attack",
-      "Middle East conflict",
-      "UAE stranded",
-      "Iran Israel",
-    ],
+    searchTerms,
     maxTweets: 50,
     addUserInfo: false,
   });
@@ -190,13 +160,25 @@ export async function scrapeXPosts(): Promise<ScrapedArticle[]> {
 
   const mapped = items
     .filter((item: Record<string, unknown>) => item && (item.full_text || item.text))
-    .map((item: Record<string, unknown>) => ({
-      title: ((item.full_text as string) || (item.text as string) || "").slice(0, 100),
-      url: item.url as string || `https://x.com/i/web/status/${item.id as string}`,
-      source: "x.com",
-      content: (item.full_text as string) || (item.text as string) || "",
-      publishedAt: (item.created_at as string) || new Date().toISOString(),
-    }));
+    .filter((item: Record<string, unknown>) => isOriginalPost(item))
+    .map((item: Record<string, unknown>) => {
+      const handle = inferHandleFromItem(item);
+      const resolvedCategory = resolveCategoryFromHandle(handle);
+      if (!resolvedCategory) return null;
+
+      const source = handle ? `@${handle}` : "x.com";
+      const content = ((item.full_text as string) || (item.text as string) || "").trim();
+
+      return {
+        title: content.slice(0, 100),
+        url: (item.url as string) || `https://x.com/i/web/status/${item.id as string}`,
+        source,
+        content,
+        publishedAt: (item.created_at as string) || new Date().toISOString(),
+        category: resolvedCategory,
+      };
+    })
+    .filter((item): item is ScrapedArticle => Boolean(item));
 
   logger.info("apify/social", "Social items collected", { count: mapped.length });
   return mapped;
