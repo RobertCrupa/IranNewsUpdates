@@ -14,14 +14,14 @@ A modern, real-time Next.js application that serves as a central information hub
 
 ## Tech Stack
 
-| Layer      | Technology                    |
-|------------|-------------------------------|
-| Framework  | Next.js 16 (App Router)       |
-| Language   | TypeScript                    |
-| Styling    | Tailwind CSS v4               |
-| Database   | MongoDB via Mongoose          |
-| Scraping   | Apify (Cheerio + Twitter)     |
-| AI/LLM     | OpenAI GPT-4o-mini            |
+| Layer     | Technology                |
+| --------- | ------------------------- |
+| Framework | Next.js 16 (App Router)   |
+| Language  | TypeScript                |
+| Styling   | Tailwind CSS v4           |
+| Database  | MongoDB via Mongoose      |
+| Scraping  | Apify (Cheerio + Twitter) |
+| AI/LLM    | OpenAI GPT-4o-mini        |
 
 ## Getting Started
 
@@ -39,14 +39,14 @@ Copy `.env.example` to `.env.local` and fill in your credentials:
 cp .env.example .env.local
 ```
 
-| Variable               | Description                                    |
-|------------------------|------------------------------------------------|
-| `MONGODB_URI`          | MongoDB connection string (Atlas recommended)  |
-| `APIFY_API_TOKEN`      | Apify API token from console.apify.com         |
-| `OPENAI_API_KEY`       | OpenAI API key from platform.openai.com        |
+| Variable               | Description                                                                |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `MONGODB_URI`          | MongoDB connection string (Atlas recommended)                              |
+| `APIFY_API_TOKEN`      | Apify API token from console.apify.com                                     |
+| `OPENAI_API_KEY`       | OpenAI API key from platform.openai.com                                    |
 | `CRON_SECRET`          | Secret used by Vercel Cron to authenticate the `/api/cron/update` endpoint |
-| `NEXT_PUBLIC_BASE_URL` | Your deployed URL (default: http://localhost:3000) |
-| `LOG_LEVEL`            | Optional log level (`debug`, `info`, `warn`, `error`) |
+| `NEXT_PUBLIC_BASE_URL` | Your deployed URL (default: http://localhost:3000)                         |
+| `LOG_LEVEL`            | Optional log level (`debug`, `info`, `warn`, `error`)                      |
 
 ### 3. Run the development server
 
@@ -70,13 +70,13 @@ In development mode, the cron/scrape/update write endpoints accept requests with
 
 ## API Routes
 
-| Route                | Method | Description                                          |
-|----------------------|--------|------------------------------------------------------|
-| `/api/news`          | GET    | Fetch paginated news articles (`?page=1&limit=20&category=news\|social`) |
-| `/api/travel`        | GET    | Fetch active travel alerts                           |
-| `/api/updates`       | GET    | Fetch latest AI-generated situation updates          |
-| `/api/cron/update`   | GET    | **Cron endpoint** — scrapes news + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Auth required in production; local dev allows no-auth calls. |
-| `/api/scrape`        | POST   | Manually trigger Apify scraping only (`type: "all"\|"news"\|"social"`). Auth required in production; local dev allows no-auth calls. |
+| Route              | Method | Description                                                                                                                                                                         |
+| ------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/news`        | GET    | Fetch paginated news articles (`?page=1&limit=20&category=news\|social`)                                                                                                            |
+| `/api/travel`      | GET    | Fetch active travel alerts                                                                                                                                                          |
+| `/api/updates`     | GET    | Fetch latest AI-generated situation updates                                                                                                                                         |
+| `/api/cron/update` | GET    | **Cron endpoint** — scrapes news + generates a situation update. Called automatically every 15 minutes by Vercel Cron. Auth required in production; local dev allows no-auth calls. |
+| `/api/scrape`      | POST   | Manually trigger Apify scraping only (`type: "all"\|"news"\|"social"`). Auth required in production; local dev allows no-auth calls.                                                |
 
 ## Automated Updates (Vercel Cron)
 
@@ -94,6 +94,7 @@ The `vercel.json` at the root of the project configures a Vercel Cron Job that c
 ```
 
 Each run:
+
 1. Scrapes fresh articles from BBC, Reuters, AP News, Al Jazeera, and X
 2. Generates a new AI situation briefing from the articles collected in that run
 3. Persists both to MongoDB
